@@ -1,0 +1,11 @@
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: multus-go-operator
+subjects:
+- kind: ServiceAccount
+  name: multus-go-operator
+roleRef:
+  kind: Role
+  name: multus-go-operator
+  apiGroup: rbac.authorization.k8s.io
