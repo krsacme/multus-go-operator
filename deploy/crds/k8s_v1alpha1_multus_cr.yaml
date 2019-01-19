@@ -1,0 +1,9 @@
+apiVersion: k8s.cni.cncf.io/v1alpha1
+kind: Multus
+metadata:
+  name: example-multus
+spec:
+  image: nfvpe/multus:latest
+  delegates:
+  - type: flannel
+    name: flannel.1

@@ -1,12 +1,12 @@
-kind: RoleBinding
+kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: multus-go-operator
-  namespace: kube-system
 subjects:
 - kind: ServiceAccount
-  name: multus-go-operator
+  name: default
+  namespace: kube-system
 roleRef:
-  kind: Role
+  kind: ClusterRole
   name: multus-go-operator
   apiGroup: rbac.authorization.k8s.io

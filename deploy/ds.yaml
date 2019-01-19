@@ -1,5 +1,5 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: multus-go-operator
   namespace: kube-system
@@ -10,16 +10,16 @@ spec:
       name: multus-go-operator
   template:
     metadata:
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ""
       labels:
         name: multus-go-operator
         tier: control-plane
     spec:
       serviceAccountName: multus-go-operator
+      priorityClassName: system-cluster-critical
       containers:
         - name: multus-go-operator
-          image: dell-r730-044.dsal.lab.eng.rdu2.redhat.com:5000/krsacme/multus-go-operator 
+          # Replace this with the built image name
+          image: dell-r640-001.dsal.lab.eng.rdu2.redhat.com:5000/krsacme/multus-go-operator 
           ports:
           - containerPort: 60000
             name: metrics
@@ -45,15 +45,3 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: "multus-go-operator"
-      dnsPolicy: ClusterFirst
-      hostNetwork: true
-      priorityClassName: system-node-critical
-      restartPolicy: Always
-      schedulerName: default-scheduler
-      serviceAccount: multus-go-operator
-      serviceAccountName: multus-go-operator
-      tolerations:
-      - key: CriticalAddonsOnly
-        operator: Exists
-      - operator: Exists
-
