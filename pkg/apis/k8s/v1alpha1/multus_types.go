@@ -16,8 +16,6 @@ type NetworkType string
 const (
 	// NetworkTypeFlannel defines the flannel network delegate
 	NetworkTypeFlannel NetworkType = "flannel"
-	// NetworkTypeOpenShiftSDN defines the OpenShiftSDN network delegate
-	NetworkTypeOpenShiftSDN NetworkType = "openshift-sdn"
 )
 
 // NetworkDelegates defines the network delegates to be used with multus
@@ -32,6 +30,8 @@ type NetworkDelegates struct {
 type MultusSpec struct {
 	// Multus CNI Image to run as DaemonSet on all the nodes
 	Image string `json:"image"`
+	// Multus CNI Release version as image tag
+	Release string `json:"release"`
 	// List of delegates to be used bu Multus
 	// TODO: Its better to use 'clusterNetwork' and 'defaultNetworks'
 	Delegates []NetworkDelegates `json:"delegates"`

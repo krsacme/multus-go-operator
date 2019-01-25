@@ -1,9 +1,10 @@
 apiVersion: k8s.cni.cncf.io/v1alpha1
 kind: Multus
 metadata:
-  name: example-multus
+  name: multus-sriov
 spec:
-  image: nfvpe/multus:latest
+  image: dell-r730-044.dsal.lab.eng.rdu2.redhat.com:5000/multus-cni-release
+  release: v3.1 
   delegates:
   - type: flannel
     name: flannel.1
