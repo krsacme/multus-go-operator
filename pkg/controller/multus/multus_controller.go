@@ -25,6 +25,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
+type CniConf struct {
+	Name      string                         `json:"name"`
+	Type      string                         `json:"type"`
+	Delegates []k8sv1alpha1.NetworkDelegates `json:"delegates"`
+	// TODO: Check if 'kubeconfig' is required
+}
+
 var log = logf.Log.WithName("controller_multus")
 
 // Add creates a new Multus Controller and adds it to the Manager. The Manager will set fields on the Controller
@@ -102,25 +109,35 @@ func (r *ReconcileMultus) Reconcile(request reconcile.Request) (reconcile.Result
 	}
 	// TODO: validate the number of multus instance, it should be only one, as having multiple version of 'multus-cni' and '.conf' files has no significance
 
-	// TODO: can net-attach-def be moved out of go (directl yaml resource)?
 	// TODO: Any advantage on maintainig via operator?
 	if err = ensureNetAttachDef(instance, r); err != nil {
 		return reconcile.Result{}, err
 	}
 
-	if err = ensureConfigMap(instance, r); err != nil {
+	cmName := instance.Name + "-cm"
+	if err = ensureConfigMap(instance, r, cmName); err != nil {
 		return reconcile.Result{}, err
 	}
 
-	if err = ensureDaemonSet(instance, r); err != nil {
+	if err = ensureDaemonSet(instance, r, cmName); err != nil {
 		return reconcile.Result{}, err
+	}
+
+	for k, _ := range instance.Spec.Extensions {
+		if k == k8sv1alpha1.ExtensionTypeSriov {
+			if err = configureSriovExtension(instance, r); err != nil {
+				return reconcile.Result{}, err
+			}
+			log.Info("sriov extension for multus is added")
+		} else {
+			log.Info("extention type is not supported", "ExtensionType", k)
+		}
 	}
 
 	return reconcile.Result{}, nil
 }
 
-func ensureConfigMap(cr *k8sv1alpha1.Multus, r *ReconcileMultus) error {
-	cmName := cr.Name + "-cm"
+func ensureConfigMap(cr *k8sv1alpha1.Multus, r *ReconcileMultus, cmName string) error {
 	cmFound := &corev1.ConfigMap{}
 	err := r.client.Get(context.TODO(), types.NamespacedName{Name: cmName, Namespace: cr.Namespace}, cmFound)
 	if err != nil && errors.IsNotFound(err) {
@@ -145,7 +162,7 @@ func ensureConfigMap(cr *k8sv1alpha1.Multus, r *ReconcileMultus) error {
 }
 
 // Ensure Multus DaemonSet is create to copy the cni executable and create cni conf for multus
-func ensureDaemonSet(cr *k8sv1alpha1.Multus, r *ReconcileMultus) error {
+func ensureDaemonSet(cr *k8sv1alpha1.Multus, r *ReconcileMultus, cmName string) error {
 	dsName := cr.Name + "-ds"
 	dsFound := &appsv1.DaemonSet{}
 	log.Info("in the daemonset", "Name", cr.Name)
@@ -154,7 +171,7 @@ func ensureDaemonSet(cr *k8sv1alpha1.Multus, r *ReconcileMultus) error {
 	if err != nil && errors.IsNotFound(err) {
 		// No DaemonSet found for multus, create a new one
 		log.Info("daemonset is not found, create one")
-		dsMultus := newDaemonSetForMultusConfig(cr, dsName)
+		dsMultus := newDaemonSetForMultusConfig(cr, r, dsName, cmName)
 		if err = r.client.Create(context.TODO(), dsMultus); err != nil {
 			log.Error(err, "error in creating a new daemonset resource")
 			return err
@@ -191,11 +208,13 @@ func ensureNetAttachDef(cr *k8sv1alpha1.Multus, r *ReconcileMultus) error {
 
 // Create ConfigMap with multus config
 func newConfigMapForMultusConfig(cr *k8sv1alpha1.Multus, cmName string) (*corev1.ConfigMap, error) {
-	data, err := json.Marshal(cr.Spec.Delegates)
+	cniConf := CniConf{Name: "multus-cni-network", Type: "multus", Delegates: cr.Spec.Delegates}
+	data, err := json.Marshal(cniConf)
 	if err != nil {
 		log.Error(err, "failed to marshal multus config to write to configmap resource")
 		return nil, err
 	}
+	log.Info("newConfigMapForMultusConfig", "data", string(data))
 	return &corev1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "ConfigMap",
@@ -212,9 +231,7 @@ func newConfigMapForMultusConfig(cr *k8sv1alpha1.Multus, cmName string) (*corev1
 }
 
 // Create new DaemonSet object for the provided multus config
-func newDaemonSetForMultusConfig(cr *k8sv1alpha1.Multus, dsName string) *appsv1.DaemonSet {
-	directoryOrCreate := corev1.HostPathDirectoryOrCreate
-	imageName := cr.Spec.Image + ":" + cr.Spec.Release
+func newDaemonSetForMultusConfig(cr *k8sv1alpha1.Multus, r *ReconcileMultus, dsName string, cmName string) *appsv1.DaemonSet {
 	log.Info("newDaemonSetForMultusConfig:", "Image", cr.Spec.Image)
 	log.Info("newDaemonSetForMultusConfig:", "Release", cr.Spec.Release)
 	return &appsv1.DaemonSet{
@@ -238,59 +255,110 @@ func newDaemonSetForMultusConfig(cr *k8sv1alpha1.Multus, dsName string) *appsv1.
 						"app": "multus",
 					},
 				},
-				Spec: corev1.PodSpec{
-					Volumes: []corev1.Volume{
-						{
-							Name: "cni-bin",
-							VolumeSource: corev1.VolumeSource{
-								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/opt/cni/bin",
-									Type: &directoryOrCreate,
-								},
-							},
-						},
-						{
-							Name: "cni-config",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "multus-cni-config",
-									},
-								},
-							},
-						},
-					},
-					InitContainers: []corev1.Container{
-						{
-							Name:  cr.Name + "-init",
-							Image: imageName,
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "cni-bin",
-									MountPath: "/opt/cni/bin/",
-								},
-								{
-									Name:      "cni-config",
-									MountPath: "/etc/multus-cni",
-								},
-							},
-						},
-					},
-					Containers: []corev1.Container{
-						{
-							Name:  cr.Name + "-conf-create",
-							Image: imageName,
-							// TODO: Change the command it later
-							Command: []string{
-								"/bin/sh",
-							},
-							Args: []string{
-								"-c", "while true; do echo hello; sleep 10;done",
-							},
-						},
+				Spec: createDaemonPodSpec(cr, r, cmName),
+			},
+		},
+	}
+}
+
+func createDaemonPodSpec(cr *k8sv1alpha1.Multus, r *ReconcileMultus, cmName string) corev1.PodSpec {
+	imageName := cr.Spec.Image + ":" + cr.Spec.Release
+	return corev1.PodSpec{
+		HostNetwork:    true,
+		Volumes:        getVolumes(cmName),
+		InitContainers: getInitContainers(cr, r, imageName),
+		Tolerations: []corev1.Toleration{
+			{
+				Operator: corev1.TolerationOpExists,
+				Effect:   corev1.TaintEffectNoSchedule,
+			},
+		},
+		Containers: []corev1.Container{
+			{
+				Name:            cr.Name + "-conf-create",
+				Image:           imageName,
+				ImagePullPolicy: corev1.PullAlways,
+				// TODO: Change the command it later
+				Command: []string{
+					"/bin/sh",
+				},
+				Args: []string{
+					"-c", "while true; do echo hello; sleep 10;done",
+				},
+				// TODO: Remove mounts, testonly
+				VolumeMounts: getVolumeMounts(),
+			},
+		},
+	}
+}
+
+func getInitContainers(cr *k8sv1alpha1.Multus, r *ReconcileMultus, imageName string) []corev1.Container {
+	containers := []corev1.Container{
+		{
+			Name:            cr.Name + "-init",
+			Image:           imageName,
+			ImagePullPolicy: corev1.PullAlways,
+			VolumeMounts:    getVolumeMounts(),
+		},
+	}
+	for k, _ := range cr.Spec.Extensions {
+		if k == k8sv1alpha1.ExtensionTypeSriov {
+			containers = append(containers, getSriovInitContainers(cr))
+		} else {
+			log.Info("extention type is not supported", "ExtensionType", k)
+		}
+	}
+
+	return containers
+}
+
+func getVolumes(cmName string) []corev1.Volume {
+	directoryOrCreate := corev1.HostPathDirectoryOrCreate
+	return []corev1.Volume{
+		{
+			Name: "cni-bin",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/opt/cni/bin",
+					Type: &directoryOrCreate,
+				},
+			},
+		},
+		{
+			Name: "cni-config",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: cmName,
 					},
 				},
 			},
+		},
+		{
+			Name: "etc-cni",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/etc/cni/net.d/",
+					Type: &directoryOrCreate,
+				},
+			},
+		},
+	}
+}
+
+func getVolumeMounts() []corev1.VolumeMount {
+	return []corev1.VolumeMount{
+		{
+			Name:      "cni-bin",
+			MountPath: "/opt/cni/bin/",
+		},
+		{
+			Name:      "cni-config",
+			MountPath: "/etc/multus-cni/",
+		},
+		{
+			Name:      "etc-cni",
+			MountPath: "/etc/cni/net.d/",
 		},
 	}
 }

@@ -3,8 +3,16 @@ kind: Multus
 metadata:
   name: multus-sriov
 spec:
-  image: dell-r730-044.dsal.lab.eng.rdu2.redhat.com:5000/multus-cni-release
-  release: v3.1 
+  image: quay.io/krsacme/multus-cni-release
+  release: v3.1
   delegates:
   - type: flannel
     name: flannel.1
+  extensions:
+    sriov:
+      # TODO: Check if IPAM info could be added here?
+      resources:
+      - name: sriov_net1
+        rootDevices:
+        - 00:2:00
+        type: netdevice

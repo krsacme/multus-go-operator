@@ -12,11 +12,27 @@ const (
 
 // NetworkType defines the supported networks for multus delegates
 type NetworkType string
+type ExtensionType string
 
 const (
 	// NetworkTypeFlannel defines the flannel network delegate
 	NetworkTypeFlannel NetworkType = "flannel"
+
+	ExtensionTypeSriov ExtensionType = "sriov"
 )
+
+// SR-IOV Resource definition
+type SriovResource struct {
+	Name        string   `json:"name"`
+	RootDevices []string `json:"rootDevices"`
+	Type        string   `json:"type"`
+}
+
+// TODO: How to generalize for multiple type of extension?
+// SR-IOV extension
+type Extension struct {
+	Resources []SriovResource `json:"resources"`
+}
 
 // NetworkDelegates defines the network delegates to be used with multus
 type NetworkDelegates struct {
@@ -35,6 +51,8 @@ type MultusSpec struct {
 	// List of delegates to be used bu Multus
 	// TODO: Its better to use 'clusterNetwork' and 'defaultNetworks'
 	Delegates []NetworkDelegates `json:"delegates"`
+	// Map of Extensions
+	Extensions map[ExtensionType]Extension `json:"extensions"`
 }
 
 // MultusStatus defines the observed state of Multus

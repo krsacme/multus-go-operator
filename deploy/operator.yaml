@@ -19,7 +19,7 @@ spec:
       serviceAccountName: multus-go-operator
       containers:
         - name: multus-go-operator
-          image: dell-r730-044.dsal.lab.eng.rdu2.redhat.com:5000/krsacme/multus-go-operator 
+          image: quay.io/krsacme/multus-go-operator 
           ports:
           - containerPort: 60000
             name: metrics
